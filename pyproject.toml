@@ -1,0 +1,18 @@
+[project]
+name = "bluesky-web-plots"
+classifiers = ["Programming Language :: Python :: 3.12"]
+description = "Dashly + plotly bluesky plotting sevice/callback."
+dependencies = ["dash", "plotly[express]", "zmq", "event-model"]
+dynamic = ["version"]
+readme = "README.md"
+requires-python = ">=3.12"
+
+[project.urls]
+GitHub = "https://github.com/evvaaaa"
+
+[[project.authors]]
+email = "eva.lott@helmholtz-berlin.de"
+name = "Eva Lott"
+
+[project.optional-dependencies]
+dev = ["ruff", "pyright", "bluesky", "ophyd_async"]
