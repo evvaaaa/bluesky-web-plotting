@@ -1,7 +1,9 @@
+import logging
 import dash
 from bluesky_web_plots.logger import logger
 from typing import cast
 
+from bluesky_web_plots import __version__
 from event_model.documents import Document, EventDescriptor, RunStart, Event, DataKey
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -30,15 +32,35 @@ def hinted_fields(descriptor: EventDescriptor):
     return columns
 
 
+WATERMARK = html.Div(
+    f"https://github.com/evvaaaa/bluesky-web-plotting version {__version__}",
+    style={
+        "position": "fixed",
+        "bottom": "10px",
+        "left": "0",
+        "width": "100%",
+        "textAlign": "center",
+        "opacity": "0.8",
+        "fontSize": "18px",
+        "pointerEvents": "none",  # Allows clicks to pass through
+        "zIndex": "9999",
+    },
+)
+
+
 class WebPlotsCallback:
-    def __init__(self, host: str = "0.0.0.0", port: int = 8095):
+    def __init__(
+        self, host: str = "0.0.0.0", port: int = 8095, update_period: float = 1.0
+    ):
         self.document_queue: Queue[Document] = Queue()
         self.HOST = host
         self.PORT = port
+        self.UPDATE_PERIOD = update_period
         self._lock = threading.Lock()
         self._figures: dict[str, BaseFigure] = {}
+        self._update_event = threading.Event()
+        self._structures: dict = {}
 
-    def __post_init__(self):
         server = Flask(__name__)
 
         # Dash self.app
@@ -46,43 +68,41 @@ class WebPlotsCallback:
 
         self.app.layout = html.Div(
             [
-                html.H1(
-                    "Real-Time Data Plotting System", style={"textAlign": "center"}
+                html.H1("Bluesky Web Plotting", style={"textAlign": "center"}),
+                html.Div(id="graphs-container"),
+                dcc.Interval(
+                    id="interval-component",
+                    interval=self.UPDATE_PERIOD * 1000,
+                    n_intervals=0,
                 ),
-                dcc.Graph(id="live-update-graphs"),
-                dcc.Interval(id="interval-component", interval=0, n_intervals=0),
+                WATERMARK,
             ]
         )
 
         @self.app.callback(
-            [
-                Output("live-update-graphs", "children"),
-            ],
+            Output("graphs-container", "children"),
             [Input("interval-component", "n_intervals")],
         )
         def update_graph(n_intervals):
             with self._lock:
+                if not self._update_event.is_set():
+                    raise dash.exceptions.PreventUpdate
                 if not self._figures:
-                    html_figures = (
-                        [
-                            dcc.Graph(
-                                figure=go.Figure().update_layout(
-                                    title="Waiting for data..."
-                                )
+                    html_figures = [
+                        dcc.Graph(
+                            figure=go.Figure().update_layout(
+                                title="Waiting for data..."
                             )
-                        ],
-                        "No data received yet",
-                    )
+                        )
+                    ]
                 else:
                     html_figures = [
-                        html.Div(
-                            [dcc.Graph(figure=figure)], style={"marginBottom": "40px"}
-                        )
+                        dcc.Graph(figure=figure.figure())
                         for figure in self._figures.values()
                     ]
+                return html_figures
 
-            return html_figures
-
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)
         self._plot_thread = threading.Thread(
             target=self.app.run,
             kwargs={"host": self.HOST, "port": self.PORT},
@@ -92,11 +112,15 @@ class WebPlotsCallback:
         self._plot_thread.start()
 
     def __call__(self, name: str, document: Document):
-        if name == "run_start":
+        if name == "start":
             self.run_start(cast(RunStart, document))
-
-        if name == "event_descriptor":
+        if name == "descriptor":
             self.descriptor(cast(EventDescriptor, document))
+        if name == "event":
+            self.event(cast(Event, document))
+
+        with self._lock:
+            self._update_event.set()
 
     def run_start(self, run_start: RunStart):
         self._structures = deep_update(
@@ -127,6 +151,7 @@ class WebPlotsCallback:
                 self._figures[name] = new_figure
 
             self._figures[name].descriptor(descriptor)
+            self._figures[name].datakey(name, descriptor["data_keys"][name])
 
     def event(self, event: Event):
         with self._lock:

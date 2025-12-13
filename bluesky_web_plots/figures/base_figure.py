@@ -8,9 +8,14 @@ from typing import Generic, TypeVar
 T = TypeVar("T", bound=BaseStructure)
 
 
-class BaseFigure(graph_objs.Figure, ABC, Generic[T]):
-    def __init__(self, structure: T): ...
+class BaseFigure(ABC, Generic[T]):
+    structure: T | None
+    _figure: graph_objs.Figure
+
     def add_layout(self): ...
+
+    def figure(self) -> graph_objs.Figure:
+        return self._figure
 
     def run_start(self, run_start: RunStart):
         raise NotImplementedError(
