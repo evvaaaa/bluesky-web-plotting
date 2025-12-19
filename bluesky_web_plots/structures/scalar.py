@@ -1,5 +1,4 @@
-from typing import TypedDict
-from .base_structure import BaseStructure
+from .base_structure import Base
 from enum import StrEnum
 
 
@@ -8,5 +7,5 @@ class PlotAgainst(StrEnum):
     SEQ_NUM = "SEQ_NUM"
 
 
-class Scalar(BaseStructure):
+class Scalar(Base):
     plot_against: PlotAgainst

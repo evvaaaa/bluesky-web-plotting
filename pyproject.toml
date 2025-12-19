@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "bluesky-web-plots"
 classifiers = ["Programming Language :: Python :: 3.12"]
 description = "Dash + plotly bluesky plotting sevice/callback."
-dependencies = ["dash", "plotly[express]", "zmq", "event-model"]
+dependencies = ["plotly[express]", "zmq", "event-model", "nicegui"]
 dynamic = ["version"]
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,7 +19,7 @@ email = "eva.lott@helmholtz-berlin.de"
 name = "Eva Lott"
 
 [project.optional-dependencies]
-dev = ["ruff", "pyright", "bluesky", "ophyd_async"]
+dev = ["ruff", "pyright", "bluesky", "ophyd_async", "aioca"]
 
 [tool.setuptools_scm]
 version_file = "bluesky_web_plots/_version.py"

@@ -1,5 +1,5 @@
 from typing import TypedDict
 
 
-class BaseStructure(TypedDict):
+class Base(TypedDict):
     name: str
