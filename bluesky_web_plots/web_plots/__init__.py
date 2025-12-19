@@ -1,2 +1,2 @@
-from .callback import WebPlotCallback as WebPlotCallback
+from .callback import PlotlyCallback as PlotlyCallback
 from .server import PlotServer as PlotServer

@@ -7,5 +7,5 @@ class View(StrEnum):
     SLICE = "SLICE"
 
 
-class Scalar(Base):
+class Array(Base):
     view: View

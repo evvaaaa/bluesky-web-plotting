@@ -1,5 +1,6 @@
 from datetime import datetime
 from plotly import graph_objs as go
+from plotly.subplots import make_subplots
 from event_model.documents import Event, RunStart, EventDescriptor, EventPage
 from bluesky_web_plots.structures.scalar import PlotAgainst, Scalar
 from .base_figure import BaseFigureCallback
@@ -18,12 +19,11 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
         self.structure: Scalar = structure or Scalar(
             plot_against=PlotAgainst.SEQ_NUM, name=name
         )
-        self.figure = go.Figure()
-        self._scan_id = 0
+        self.figure = make_subplots(shared_xaxes=True)
+        self.figure.update_layout({"uirevision": "constant"})
 
     def run_start(self, document: RunStart):
-        self._scan_id += 1
-        self._scan_id = document.get("scan_id", self._scan_id)
+        self._scan_id = document.get("scan_id", document["uid"][4:])
 
     def descriptor(self, document: EventDescriptor):
         data_key = document["data_keys"].get(self.structure["name"], {})
@@ -32,13 +32,13 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
             dict(
                 xaxis_title="Sequence Number"
                 if self.structure["plot_against"] == PlotAgainst.SEQ_NUM
-                else "Time (s)",
+                else "Time",
                 yaxis_title=data_key.get("units", "value"),
             )
         )
 
         self.figure.add_trace(
-            go.Scatter(x=[], y=[], mode="lines+markers", name=self._scan_id)
+            go.Scatter(x=[], y=[], mode="lines+markers", name=f"plan {self._scan_id}")
         )
 
     def event(self, document: Event):
