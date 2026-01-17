@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "bluesky-web-plots"
 classifiers = ["Programming Language :: Python :: 3.12"]
 description = "Dash + plotly bluesky plotting sevice/callback."
-dependencies = ["plotly[express]", "zmq", "event-model", "dash_bootstrap_components"]
+dependencies = ["plotly[express]", "zmq", "event-model", "nicegui"]
 dynamic = ["version"]
 readme = "README.md"
 requires-python = ">=3.12"

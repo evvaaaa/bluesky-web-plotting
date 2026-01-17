@@ -1,118 +1,129 @@
-import os
-import logging
-import itertools
+from pathlib import Path
+import time
 import plotly.graph_objects as go
 import threading
 from queue import Queue
-from dash import Dash, html, dcc, Output, Input, State, MATCH, callback_context
-import dash_bootstrap_components as dbc
-from flask import Flask
+from nicegui import app, ui
+from bluesky_web_plots.logger import logger
+
 from bluesky_web_plots import __version__
 
 
 class PlotServer:
-    def __init__(self, host: str = "0.0.0.0", port=8080, columns=2) -> None:
+    def __init__(
+        self, as_a_service: bool = True, host: str = "0.0.0.0", port=8080, columns=2
+    ) -> None:
+        self._as_a_service = as_a_service
         self.HOST = host
         self.PORT = port
         self._columns = columns
         self.updated_plot_queue: Queue[tuple[str, go.Figure]] = Queue()
-        self._plots: dict[str, go.Figure] = {}
+        self._plots: dict[str, ui.plotly] = {}
         self._paused_figures: set[str] = set()
-        self._hidden_figures: set[str] = set()
-        self._lock = threading.Lock()
 
-    def run(self) -> None:
-        log = logging.getLogger("werkzeug")
-        log.setLevel(logging.ERROR)
-        server = Flask(
-            __name__,
+        self._non_plot_widgets = {}
+
+    def run(self):
+        if self._as_a_service:
+            self.run_as_a_service()
+        else:
+            self.run_on_background_thread()
+
+    def run_as_a_service(self):
+        """If being ran as a service then this will block the thread."""
+
+        ui.run(
+            self.root,
+            reload=False,
+            host=self.HOST,
+            port=self.PORT,
+            dark=True,
+            favicon=Path(__file__).parent / "bluesky-logo-dark.svg",
         )
-        self._app = Dash(
-            title="Bluesky Web Plots",
-            server=server,
-            external_stylesheets=[dbc.themes.BOOTSTRAP],
-            update_title=None,  # type: ignore
-        )
-        self._setup_layout()
+
+    def run_on_background_thread(self):
+        """If being ran as a callback then the plots will be displayed on a background thread."""
+
+        started = threading.Event()
+        app.on_startup(started.set)
         thread = threading.Thread(
-            target=lambda: self._app.run(
+            target=lambda: ui.run(
+                self.root,
+                reload=False,
                 host=self.HOST,
                 port=self.PORT,
-                debug=False,
-                use_reloader=False,
+                dark=True,
+                favicon=Path(__file__).parent / "bluesky-logo-dark.svg",
             ),
             daemon=True,
         )
         thread.start()
+        if not started.wait(timeout=5):
+            raise RuntimeError("NiceGUI did not start in 5 seconds.")
 
-    def add_widget(self, name: str, figure: go.Figure):
-        with self._lock:
-            self._plots[name] = figure
+    def add_widget(self, ui, name: str, figure: go.Figure):
+        logger.info(f"Adding widget for plot: {name} {figure.data[0]['type']}")
+        if name not in self._plots:
+            non_plot_widgets = {}
+            self._non_plot_widgets[name] = non_plot_widgets
+            with self.div:
+                self._non_plot_widgets["card"] = ui.card(align_items="center")
+                with self._non_plot_widgets["card"]:
+                    with ui.row():
+                        ui.label(name)
+                        non_plot_widgets["show_hide"] = ui.button(
+                            text="HIDE", on_click=None
+                        )
+                        non_plot_widgets["pause_play"] = ui.button(
+                            text="PAUSE",
+                            on_click=None,
+                        )
+                    self._plots[name] = ui.plotly(figure)
 
-    def _setup_layout(self):
-        app = self._app
+            def pause_play_click(name):
+                button = self._non_plot_widgets[name]["pause_play"]
+                to_play = button.text == "PLAY"
+                if to_play:
+                    self._paused_figures.remove(name)
+                    button.set_text("PAUSE")
+                    self._plots[name].update()
+                else:
+                    self._paused_figures.add(name)
+                    button.set_text("PLAY")
 
-        def make_card(name, figure):
-            return dbc.Card(
-                [
-                    dbc.CardHeader(
-                        dbc.Row(
-                            [dbc.Col(html.H5(name))],
-                            justify="between",
-                        ),
-                    ),
-                    dbc.Collapse(
-                        dcc.Graph(id={"type": "plot", "index": name}, figure=figure),
-                        id={"type": "collapse", "index": name},
-                        is_open=True,
-                    ),
-                ],
-                style={"margin": "10px"},
+            non_plot_widgets["pause_play"].on_click(
+                lambda name=name: pause_play_click(name)
             )
 
-        app.layout = html.Div(
-            [
-                html.Div(
-                    [
-                        html.H1("Bluesky Web Plots"),
-                        html.Div(
-                            f"https://github.com/evvaaaa/bluesky-web-plotting version {__version__}",
-                            style={
-                                "opacity": 0.5,
-                            },
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "flexDirection": "column",
-                        "alignItems": "center",
-                    },
-                ),
-                dcc.Interval(id="interval", interval=250, n_intervals=0),
-                html.Div(id="plots-container"),
-            ]
-        )
+            def show_hide_click(name):
+                button = self._non_plot_widgets[name]["show_hide"]
+                to_show = button.text == "SHOW"
+                self._plots[name].set_visibility(to_show)
+                button.set_text("SHOW" if not to_show else "HIDE")
 
-        @app.callback(
-            Output("plots-container", "children"),
-            Input("interval", "n_intervals"),
-            State("plots-container", "children"),
-            prevent_initial_call=False,
-        )
-        def update_plots(n, children):
-            with self._lock:
-                while not self.updated_plot_queue.empty():
-                    name, figure = self.updated_plot_queue.get()
-                    self._plots[name] = figure
+            non_plot_widgets["show_hide"].on_click(
+                lambda name=name: show_hide_click(name)
+            )
 
-                columns = [[] for _ in range(self._columns)]
-                columns_iter = itertools.cycle(columns)
-                for name, fig in self._plots.items():
-                    is_paused = name in self._paused_figures
-                    display_fig = (
-                        fig if not is_paused else fig
-                    )  # Show last state if paused
-                    next(columns_iter).append(make_card(name, display_fig))
-                return dbc.Row(
-                    [dbc.Col(column, width=12 // self._columns) for column in columns]
-                )
+    @ui.refreshable
+    def listen(self):
+        while not self.updated_plot_queue.empty():
+            name, figure = self.updated_plot_queue.get()
+            if name not in self._plots:
+                self.add_widget(ui, name, figure)
+            if name not in self._paused_figures:
+                self._plots[name].update()
+
+    @ui.page("/plots")
+    def root(self) -> None:
+        ui.page_title("Bluesky Web Plots")
+        ui.html(
+            "<h1>Bluesky Web Plots</h1>",
+            sanitize=False,
+        )
+        ui.label(
+            f"https://github.com/evvaaaa/bluesky-web-plotting version {__version__}"
+        ).classes("opacity-50")
+        self.div = ui.element("div").classes(f"columns-{self._columns} w-full gap-2")
+
+        ui.timer(1, self.listen)

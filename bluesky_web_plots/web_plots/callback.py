@@ -1,9 +1,8 @@
-import time
+import threading
 from bluesky.callbacks.zmq import RemoteDispatcher
 from .server import PlotServer
 from bluesky_web_plots.logger import logger
 from typing import cast
-from queue import Queue
 
 from event_model.documents import (
     Document,
@@ -50,8 +49,8 @@ class PlotlyCallback:
             "http://"
         )  # will fail if you try e.g "http://0.0.0.0"
         if zmq_host is not None:
-            zmq_host = f"tcp://{zmq_host.lstrip('tcp://')}"  # ensure "tcp://" prefix
-        if zmq_port is None or zmq_host:
+            zmq_host = zmq_host.lstrip("tcp://")
+        if zmq_port is None or zmq_host is None:
             self.ZMQ_URL = None
             logger.warning(
                 "Creating a callback without a ZMQ stream... The plotter will slow down your run engine substantially for very large seq-num plans."
@@ -59,17 +58,21 @@ class PlotlyCallback:
         else:
             self.ZMQ_URL = f"{zmq_host}:{zmq_port}"
 
-        self._server = PlotServer(host=plot_host, port=plot_port, columns=columns)
+        self._server = PlotServer(
+            as_a_service=self.ZMQ_URL is not None,
+            host=plot_host,
+            port=plot_port,
+            columns=columns,
+        )
 
         self._current_run_start: RunStart | None = None
-        self.document_queue: Queue[Document] = Queue()
         self._figures: dict[str, BaseFigureCallback] = {}
         self._structures: dict = {}
 
         logger.info(f"Starting gui at http://{plot_host}:{plot_port}")
-        self._server.run()
+        self.run()
 
-    def run(self):
+    def _run(self):
         """Runs the callback as a service listening to ZMQ for event documents."""
 
         if self.ZMQ_URL is None:
@@ -85,6 +88,10 @@ class PlotlyCallback:
         except KeyboardInterrupt:
             print("Exiting...")
             remote_dispatcher.stop()
+
+    def run(self):
+        threading.Thread(target=self._run, daemon=True).start()
+        self._server.run()
 
     def __call__(self, name: str, document: Document):
         if name == "start":

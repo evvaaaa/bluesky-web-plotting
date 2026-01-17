@@ -15,19 +15,19 @@ def main():
         "--plot-host",
         type=str,
         default="0.0.0.0",
-        help="Host for viewing the web interface.",
+        help="Host for viewing the web interface. (default 0.0.0.0)",
     )
     parser.add_argument(
         "--plot-port",
         type=int,
         default=8080,
-        help="Port for viewing the web interface.",
+        help="Port for viewing the web interface. (default 8080)",
     )
     parser.add_argument(
         "--columns",
         type=int,
         default=2,
-        help="Number of columns for plots in the web UI.",
+        help="Number of columns for plots in the web UI. (default 2)",
     )
     args = parser.parse_args()
 
@@ -40,5 +40,5 @@ def main():
     ).run()
 
 
-if __name__ == "__main__":
+if __name__ in ("__mp_main__", "__main__"):
     main()
