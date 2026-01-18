@@ -1,8 +1,11 @@
 from datetime import datetime
+
+from event_model.documents import Event, EventDescriptor, EventPage, RunStart
 from plotly import graph_objs as go
 from plotly.subplots import make_subplots
-from event_model.documents import Event, RunStart, EventDescriptor, EventPage
+
 from bluesky_web_plots.structures.scalar import PlotAgainst, Scalar
+
 from .base_figure import BaseFigureCallback
 
 

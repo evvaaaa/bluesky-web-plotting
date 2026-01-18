@@ -1,17 +1,21 @@
-import os
-import logging
 import itertools
-import plotly.graph_objects as go
+import logging
 import threading
 from queue import Queue
-from dash import Dash, html, dcc, Output, Input, State, MATCH, callback_context
+
 import dash_bootstrap_components as dbc
+import plotly.graph_objects as go
+from dash import Dash, Input, Output, State, dcc, html
 from flask import Flask
+
 from bluesky_web_plots import __version__
+from bluesky_web_plots.logger import logger
 
 
 class PlotServer:
-    def __init__(self, host: str = "0.0.0.0", port=8080, columns=2) -> None:
+    def __init__(
+        self, host: str = "0.0.0.0", port=8080, columns=2, local_window_mode=False
+    ) -> None:
         self.HOST = host
         self.PORT = port
         self._columns = columns
@@ -24,9 +28,7 @@ class PlotServer:
     def run(self) -> None:
         log = logging.getLogger("werkzeug")
         log.setLevel(logging.ERROR)
-        server = Flask(
-            __name__,
-        )
+        server = Flask(__name__)
         self._app = Dash(
             title="Bluesky Web Plots",
             server=server,
@@ -34,7 +36,7 @@ class PlotServer:
             update_title=None,  # type: ignore
         )
         self._setup_layout()
-        thread = threading.Thread(
+        app_thread = threading.Thread(
             target=lambda: self._app.run(
                 host=self.HOST,
                 port=self.PORT,
@@ -43,7 +45,8 @@ class PlotServer:
             ),
             daemon=True,
         )
-        thread.start()
+
+        app_thread.start()
 
     def add_widget(self, name: str, figure: go.Figure):
         with self._lock:
@@ -97,9 +100,10 @@ class PlotServer:
             Output("plots-container", "children"),
             Input("interval", "n_intervals"),
             State("plots-container", "children"),
-            prevent_initial_call=False,
+            prevent_initial_call=True,
         )
         def update_plots(n, children):
+            logger.debug(f"Updated plots for the {n}th time.")
             with self._lock:
                 while not self.updated_plot_queue.empty():
                     name, figure = self.updated_plot_queue.get()

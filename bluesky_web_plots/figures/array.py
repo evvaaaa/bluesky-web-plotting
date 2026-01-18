@@ -1,7 +1,10 @@
 from datetime import datetime
+
+from event_model.documents import Event, EventDescriptor, EventPage, RunStart
 from plotly import graph_objs as go
-from event_model.documents import Event, RunStart, EventDescriptor, EventPage
+
 from bluesky_web_plots.structures.array import Array, View
+
 from .base_figure import BaseFigureCallback
 
 

@@ -1,9 +1,10 @@
-from plotly import graph_objs as go
-from event_model.documents import Event, EventPage, EventDescriptor, RunStart
-from bluesky_web_plots.structures.base_structure import Base
-from typing import Generic, TypeVar
 from abc import ABC, abstractmethod
-from plotly.basedatatypes import BaseTraceType
+from typing import Generic, TypeVar
+
+from event_model.documents import Event, EventDescriptor, EventPage, RunStart
+from plotly import graph_objs as go
+
+from bluesky_web_plots.structures.base_structure import Base
 
 T = TypeVar("T", bound=(Base | None))
 

@@ -6,10 +6,9 @@ from bluesky_web_plots.web_plots.callback import PlotlyCallback
 def main():
     parser = argparse.ArgumentParser(description="Bluesky Web Plots")
     parser.add_argument(
-        "zmq_host", type=str, help="ZMQ host to connect to for documents."
-    )
-    parser.add_argument(
-        "zmq_port", type=int, help="ZMQ port to connect to for documents."
+        "zmq_uri",
+        type=str,
+        help="ZMQ host to connect to for documents. Example 0.0.0.0:5578",
     )
     parser.add_argument(
         "--plot-host",
@@ -29,14 +28,19 @@ def main():
         default=2,
         help="Number of columns for plots in the web UI.",
     )
+    parser.add_argument(
+        "--local-window-mode",
+        action="store_true",
+        help="Produce a local window for plots.",
+    )
     args = parser.parse_args()
 
     PlotlyCallback(
-        zmq_host=args.zmq_host,
-        zmq_port=args.zmq_port,
+        zmq_uri=args.zmq_uri,
         plot_host=args.plot_host,
         plot_port=args.plot_port,
         columns=args.columns,
+        local_window_mode=bool(args.local_window_mode),
     ).run()
 
 

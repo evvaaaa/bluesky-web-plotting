@@ -3,13 +3,23 @@ requires = ["setuptools>=64", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
+classifiers = [
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 name = "bluesky-web-plots"
-classifiers = ["Programming Language :: Python :: 3.12"]
 description = "Dash + plotly bluesky plotting sevice/callback."
-dependencies = ["plotly[express]", "zmq", "event-model", "dash_bootstrap_components"]
+dependencies = [
+  "plotly[express]",
+  "zmq",
+  "event-model",
+  "dash",
+  "dash_bootstrap_components",
+]
 dynamic = ["version"]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 
 [project.urls]
 GitHub = "https://github.com/evvaaaa"
@@ -19,7 +29,10 @@ email = "eva.lott@helmholtz-berlin.de"
 name = "Eva Lott"
 
 [project.optional-dependencies]
-dev = ["ruff", "pyright", "bluesky", "ophyd_async", "aioca"]
+dev = ["ruff", "pyright", "bluesky", "ophyd_async", "pytest-asyncio"]
+# If you want to use the callback in the same thread
+local = ["pyqtwebengine", "pywebview", "pywebview[qt]", "pycairo", "PyGObject"]
+
 
 [tool.setuptools_scm]
 version_file = "bluesky_web_plots/_version.py"

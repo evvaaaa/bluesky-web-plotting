@@ -1,92 +1,128 @@
-import time
-from bluesky.callbacks.zmq import RemoteDispatcher
-from .server import PlotServer
-from bluesky_web_plots.logger import logger
-from typing import cast
+import multiprocessing
 from queue import Queue
+from typing import cast
 
+from bluesky.callbacks.zmq import RemoteDispatcher
 from event_model.documents import (
-    Document,
-    EventDescriptor,
-    RunStart,
-    Event,
     DataKey,
+    Document,
+    Event,
+    EventDescriptor,
     EventPage,
+    RunStart,
 )
-from bluesky_web_plots.figures.base_figure import BaseFigureCallback
-from bluesky_web_plots.utils import deep_update, hinted_fields
-from bluesky_web_plots.figures.scalar import ScalarFigureCallback
+
 from bluesky_web_plots.figures.array import ArrayFigureCallback
+from bluesky_web_plots.figures.base_figure import BaseFigureCallback
+from bluesky_web_plots.figures.scalar import ScalarFigureCallback
+from bluesky_web_plots.logger import logger
+from bluesky_web_plots.utils import deep_update, hinted_fields
+
+from .server import PlotServer
 
 
 class PlotlyCallback:
     def __init__(
         self,
-        zmq_host: str | None = None,
-        zmq_port: int | None = None,
+        zmq_uri: str | None = None,
         plot_host: str = "0.0.0.0",
         plot_port=8080,
         columns=3,
+        local_window_mode: bool = False,
     ):
         """A callback for plotting event document output through the web, with either simple,
         or complicated structures.
 
+        If `zmq_uri` is not provided then it the window will open in local_window_mode mode as the
+        callback is not running as a service.
+
         Args:
-            zmq_host (str | None):
-                The ZMQ host to connect to for documents. If not provided then the callback can be ran directly
-                as a RE.subscribe callback instead.
-            zmq_port (str | None):
-                The ZMQ port to connect to for documents. If not provided then the callback can be ran directly
-                as a RE.subscribe callback instead.
+            zmq_uri (str | None):
+                The ZMQ host to connect to for documents. If not provided then the callback
+                can be ran directly as a RE.subscribe callback instead.
             plot_host (str):
                 The host that will be used for viewing the web interface.
             plot_port (str):
                 The port that will be used for viewing the web interface.
             columns (int):
                 The number of columns that the plots will be packed into in the web ui.
+            local_window_mode (bool):
+                Spawn a local Qt5 editor.
         """
 
+        self.PLOT_PORT = plot_port
         plot_host = plot_host.lstrip(
             "http://"
         )  # will fail if you try e.g "http://0.0.0.0"
-        if zmq_host is not None:
-            zmq_host = f"tcp://{zmq_host.lstrip('tcp://')}"  # ensure "tcp://" prefix
-        if zmq_port is None or zmq_host:
-            self.ZMQ_URL = None
+        if zmq_uri is None:
             logger.warning(
                 "Creating a callback without a ZMQ stream... The plotter will slow down your run engine substantially for very large seq-num plans."
             )
         else:
-            self.ZMQ_URL = f"{zmq_host}:{zmq_port}"
+            # Ensure no "tcp://" prefix, this is added in the RemoteDispatcher
+            zmq_uri = zmq_uri.lstrip("tcp://")
 
-        self._server = PlotServer(host=plot_host, port=plot_port, columns=columns)
+        self.ZMQ_URI = zmq_uri
+
+        self._server = PlotServer(
+            host=plot_host,
+            port=plot_port,
+            columns=columns,
+        )
 
         self._current_run_start: RunStart | None = None
         self.document_queue: Queue[Document] = Queue()
         self._figures: dict[str, BaseFigureCallback] = {}
         self._structures: dict = {}
 
+        # local_window_mode is for when the process is for creating a local window
+        # a new one for each run whenever it's closed, mimicking best effort callback
+        # and not relying on the browser process which may be slow from an abundance
+        # of tabs, or a bad browser. The plots will still be viewable
+        # from a normal browser.
+        self._local_window_mode = local_window_mode
+        self._local_window_process = multiprocessing.Process(
+            target=self._create_local_window
+        )
+
         logger.info(f"Starting gui at http://{plot_host}:{plot_port}")
         self._server.run()
+
+    def _create_local_window(self):
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PyQt5.QtWidgets import QApplication
+
+        app = QApplication([])
+        view = QWebEngineView()
+        view.load(QUrl(f"http://localhost:{self.PLOT_PORT}"))
+        view.show()
+        app.exec_()
 
     def run(self):
         """Runs the callback as a service listening to ZMQ for event documents."""
 
-        if self.ZMQ_URL is None:
+        if self.ZMQ_URI is None:
             raise ValueError(
                 "Cannot run as a service as the ZMQ host or port was not provided on init."
             )
 
-        remote_dispatcher = RemoteDispatcher(self.ZMQ_URL)
+        remote_dispatcher = RemoteDispatcher(self.ZMQ_URI)
         remote_dispatcher.subscribe(self)
-        logger.info(f"Connected to {self.ZMQ_URL} Ready to Plot, Ctrl + C to Exit")
+        logger.info(f"Connected to {self.ZMQ_URI} Ready to Plot, Ctrl + C to Exit")
         try:
             remote_dispatcher.start()
         except KeyboardInterrupt:
             print("Exiting...")
             remote_dispatcher.stop()
 
+        if self._local_window_mode:
+            self._local_window_process.start()
+
     def __call__(self, name: str, document: Document):
+        if self._local_window_mode and not self._local_window_process.is_alive():
+            self._local_window_process.start()
+
         if name == "start":
             self.run_start(cast(RunStart, document))
         if name == "descriptor":

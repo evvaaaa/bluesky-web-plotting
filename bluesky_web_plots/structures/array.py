@@ -1,5 +1,6 @@
-from .base_structure import Base
 from enum import StrEnum
+
+from .base_structure import Base
 
 
 class View(StrEnum):
