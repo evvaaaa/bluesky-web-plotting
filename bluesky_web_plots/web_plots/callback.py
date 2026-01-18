@@ -80,13 +80,32 @@ class PlotlyCallback:
         # and not relying on the browser process which may be slow from an abundance
         # of tabs, or a bad browser. The plots will still be viewable
         # from a normal browser.
-        self._local_window_mode = local_window_mode
-        self._local_window_process = multiprocessing.Process(
-            target=self._create_local_window
-        )
+
+        if local_window_mode and self._can_use_local_window():
+            self._local_window_mode = local_window_mode
+            self._local_window_process = multiprocessing.Process(
+                target=self._create_local_window
+            )
+        else:
+            self._local_window_mode = local_window_mode
+            self._local_window_process = None
 
         logger.info(f"Starting gui at http://{plot_host}:{plot_port}")
         self._server.run()
+
+    def _can_use_local_window(self) -> bool:
+        try:
+            import pyqtwebengine
+            import pywebview
+            import pycairo
+            import gi  # PyGObject
+        except ImportError as e:
+            logger.warning(
+                "\033[93mLocal window mode requires the 'local' optional dependencies. "
+                f"Install with: pip install .[local].\033[0m"
+            )
+            return False
+        return True
 
     def _create_local_window(self):
         from PyQt5.QtCore import QUrl
@@ -116,11 +135,15 @@ class PlotlyCallback:
             print("Exiting...")
             remote_dispatcher.stop()
 
-        if self._local_window_mode:
+        if self._local_window_mode and self._local_window_process is not None:
             self._local_window_process.start()
 
     def __call__(self, name: str, document: Document):
-        if self._local_window_mode and not self._local_window_process.is_alive():
+        if (
+            self._local_window_mode
+            and self._local_window_process is not None
+            and not self._local_window_process.is_alive()
+        ):
             self._local_window_process.start()
 
         if name == "start":

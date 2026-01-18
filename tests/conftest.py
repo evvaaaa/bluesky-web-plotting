@@ -60,6 +60,7 @@ def plot_subprocess():
         )
 
         def wait_for_local_window_close(signum, frame):
+            assert callback._local_window_process is not None
             while callback._local_window_process.is_alive():
                 # For use in example mode, wait for the user to close
                 # the local window.
@@ -67,6 +68,11 @@ def plot_subprocess():
             exit(0)
 
         if EXAMPLE_MODE:
+            if callback._local_window_process is None:
+                raise RuntimeError(
+                    "Example mode requested but local window process could not be created. "
+                    "Have you installed the local optional dependencies?"
+                )
             signal.signal(signal.SIGINT, wait_for_local_window_close)
 
         callback.run()
