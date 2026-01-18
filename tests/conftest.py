@@ -1,34 +1,40 @@
 import os
 import signal
 import time
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 
 import pytest
 import zmq
 from bluesky.callbacks.zmq import Proxy, Publisher
 from bluesky.run_engine import RunEngine
 
-from bluesky_web_plots import PlotlyCallback
+from bluesky_web_plots import WebPlotCallback
 
 EXAMPLE_MODE = os.getenv("BLUESKY_WEB_PLOTS_EXAMPLE_MODE", "0") == "1"
 
 
 @pytest.fixture(scope="session")
 def zmq_proxy_subprocess():
+    exception_queue = Queue()
+
     def start_proxy_and_dispatcher():
-        proxy = Proxy(in_port=5577, out_port=5578)
-        proxy.start()
+        try:
+            proxy = Proxy(in_port=5577, out_port=5578)
+            proxy.start()
+        except Exception as e:
+            exception_queue.put(e)
 
     zmq_proxy = Process(target=start_proxy_and_dispatcher, daemon=True)
     try:
         zmq_proxy.start()
         time.sleep(1)
-        if not zmq_proxy.is_alive():
-            raise RuntimeError("ZMQ proxy subprocess failed to start.")
         yield zmq_proxy
     finally:
         if not zmq_proxy.is_alive():
-            raise RuntimeError("ZMQ proxy died during test.")
+            if not exception_queue.empty():
+                raise exception_queue.get()
+            else:
+                raise RuntimeError("ZMQ proxy died during test.")
         zmq_proxy.terminate()
         zmq_proxy.join(timeout=1)
         zmq_proxy.close()
@@ -48,41 +54,44 @@ def zmq_proxy_run_engine(zmq_proxy_subprocess):
 @pytest.fixture(scope="function")
 def threaded_callback_run_engine():
     RE = RunEngine()
-    RE.subscribe(PlotlyCallback())
+    RE.subscribe(WebPlotCallback())
     return RE
 
 
 @pytest.fixture(scope="function")
 def plot_subprocess():
+    exception_queue = Queue()
+
     def start_plotly_callback():
-        callback = PlotlyCallback(
-            zmq_uri="127.0.0.1:5578", local_window_mode=EXAMPLE_MODE
-        )
+        try:
+            callback = WebPlotCallback(
+                zmq_uri="127.0.0.1:5578", local_window_mode=EXAMPLE_MODE
+            )
 
-        def wait_for_local_window_close(signum, frame):
-            assert callback._local_window_process is not None
-            while callback._local_window_process.is_alive():
-                # For use in example mode, wait for the user to close
-                # the local window.
-                pass
-            exit(0)
+            def wait_for_local_window_close(signum, frame):
+                assert callback._local_window_process is not None
+                while callback._local_window_process.is_alive():
+                    # For use in example mode, wait for the user to close
+                    # the local window.
+                    pass
+                exit(0)
 
-        if EXAMPLE_MODE:
-            if callback._local_window_process is None:
-                raise RuntimeError(
-                    "Example mode requested but local window process could not be created. "
-                    "Have you installed the local optional dependencies?"
-                )
-            signal.signal(signal.SIGINT, wait_for_local_window_close)
+            if EXAMPLE_MODE:
+                if callback._local_window_process is None:
+                    raise RuntimeError(
+                        "Example mode requested but local window process could not be created. "
+                        "Have you installed the local optional dependencies?"
+                    )
+                signal.signal(signal.SIGINT, wait_for_local_window_close)
 
-        callback.run()
+            callback.run()
+        except Exception as e:
+            exception_queue.put(e)
 
     zmq_callback = Process(target=start_plotly_callback)
     try:
         zmq_callback.start()
         time.sleep(1)
-        if not zmq_callback.is_alive():
-            raise RuntimeError("ZMQ Plot Callback subprocess failed to start.")
         yield zmq_callback
     finally:
 
@@ -106,7 +115,10 @@ def plot_subprocess():
 
         wait_for_zmq_drain("tcp://127.0.0.1:5578")
         if not zmq_callback.is_alive():
-            raise RuntimeError("ZMQ Plot callback died during test.")
+            if not exception_queue.empty():
+                raise exception_queue.get()
+            else:
+                raise RuntimeError("ZMQ Plot callback died during test.")
 
         if EXAMPLE_MODE:
             join_time = None

@@ -21,7 +21,7 @@ from bluesky_web_plots.utils import deep_update, hinted_fields
 from .server import PlotServer
 
 
-class PlotlyCallback:
+class WebPlotCallback:
     def __init__(
         self,
         zmq_uri: str | None = None,
@@ -95,22 +95,22 @@ class PlotlyCallback:
 
     def _can_use_local_window(self) -> bool:
         try:
-            import pyqtwebengine
-            import pywebview
-            import pycairo
-            import gi  # PyGObject
-        except ImportError as e:
+            import gi  # noqa: F401 # pyright: ignore
+            import pycairo  # noqa: F401 # pyright: ignore
+            import pyqtwebengine  # noqa: F401 # pyright: ignore
+            import pywebview  # noqa: F401 # pyright: ignore
+        except ImportError:
             logger.warning(
                 "\033[93mLocal window mode requires the 'local' optional dependencies. "
-                f"Install with: pip install .[local].\033[0m"
+                "Install with: pip install .[local].\033[0m"
             )
             return False
         return True
 
     def _create_local_window(self):
-        from PyQt5.QtCore import QUrl
-        from PyQt5.QtWebEngineWidgets import QWebEngineView
-        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QUrl  # noqa: F401 # pyright: ignore
+        from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: F401 # pyright: ignore
+        from PyQt5.QtWidgets import QApplication  # noqa: F401 # pyright: ignore
 
         app = QApplication([])
         view = QWebEngineView()

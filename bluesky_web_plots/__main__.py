@@ -1,6 +1,6 @@
 import argparse
 
-from bluesky_web_plots.web_plots.callback import PlotlyCallback
+from bluesky_web_plots.web_plots.callback import WebPlotCallback
 
 
 def main():
@@ -35,7 +35,7 @@ def main():
     )
     args = parser.parse_args()
 
-    PlotlyCallback(
+    WebPlotCallback(
         zmq_uri=args.zmq_uri,
         plot_host=args.plot_host,
         plot_port=args.plot_port,
