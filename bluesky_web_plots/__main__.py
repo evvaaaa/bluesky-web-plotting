@@ -33,14 +33,26 @@ def main():
         action="store_true",
         help="Produce a local window for plots.",
     )
+    parser.add_argument(
+        "--ignore-streams",
+        type=str,
+        nargs="*",
+        default=[],
+        help=(
+            "Streams to 'ignore' (not display plots for). Example: "
+            "--ignore-streams baseline secondary"
+        ),
+    )
     args = parser.parse_args()
 
+    print(args.ignore_streams)
     WebPlotCallback(
         zmq_uri=args.zmq_uri,
         plot_host=args.plot_host,
         plot_port=args.plot_port,
         columns=args.columns,
         local_window_mode=bool(args.local_window_mode),
+        ignore_streams=args.ignore_streams,
     ).run()
 
 

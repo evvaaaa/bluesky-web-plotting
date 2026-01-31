@@ -1,12 +1,13 @@
-import numpy as np
 import bluesky.plan_stubs as bps
+import numpy as np
 import pytest
-from plotly import graph_objects as go
 from bluesky.plans import count, grid_scan
 from bluesky.run_engine import RunEngine
 from ophyd_async import plan_stubs as oaps
+from plotly import graph_objects as go
 
 from bluesky_web_plots.structures import unpack_structures
+from bluesky_web_plots.structures.sample_map import ColorScale, SampleMap
 from bluesky_web_plots.structures.scalar import PlotAgainst, Scalar
 
 from .mock_devices import Mca, SomeActuator, setup_sample_map_mock_logic
@@ -39,7 +40,12 @@ def test_grid_scan(RE_and_mock_devices, plot_subprocess):
     RE, mca, motor1, motor2 = RE_and_mock_devices
     plot_options = {
         "hints": unpack_structures(
-            Scalar(names=(motor1.readback.name,), plot_against=PlotAgainst.TIME)
+            Scalar(names=(motor1.readback.name,), plot_against=PlotAgainst.TIME),
+            SampleMap(
+                names=(motor1.readback.name, motor2.readback.name, mca.mean.name),
+                intensity_data_key=mca.mean.name,
+                color_scale=ColorScale.VIRIDIS,
+            ),
         )
     }
 
@@ -58,6 +64,16 @@ def test_grid_scan(RE_and_mock_devices, plot_subprocess):
             md=plot_options,
         )
     )
+    plot_options = {
+        "hints": unpack_structures(
+            Scalar(names=(motor1.readback.name,), plot_against=PlotAgainst.TIME),
+            SampleMap(
+                names=(motor1.readback.name, motor2.readback.name, mca.mean.name),
+                intensity_data_key=mca.mean.name,
+                color_scale=ColorScale.BLACKBODY,
+            ),
+        )
+    }
     RE(
         grid_scan(
             [mca],

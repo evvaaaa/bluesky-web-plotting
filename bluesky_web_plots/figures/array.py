@@ -20,6 +20,8 @@ class ArrayFigureCallback(BaseFigureCallback[Array]):
         self._scan_id = document.get("scan_id", document["uid"][4:])
 
     def descriptor(self, document: EventDescriptor):
+        if self.structure["names"][0] not in document["data_keys"].keys():
+            return
         data_key = document["data_keys"].get(self.structure["names"][0], {})
         shape = data_key.get("shape")
         if shape and self.structure["view"] == View.SLICE:
@@ -30,6 +32,8 @@ class ArrayFigureCallback(BaseFigureCallback[Array]):
             )
 
     def event(self, document: Event):
+        if self.structure["names"][0] not in document["data"].keys():
+            return
         trace = self.figure.data[-1]
         received = document["data"][self.structure["names"][0]]
         if self.structure["view"] == View.SLICE:

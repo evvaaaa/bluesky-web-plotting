@@ -5,7 +5,8 @@ from queue import Queue
 
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
-from dash import Dash, Input, Output, State, dcc, html
+from dash import Dash, Input, Output, State, callback_context, dcc, html, no_update
+from dash.dependencies import ALL
 from flask import Flask
 
 from bluesky_web_plots import __version__
@@ -13,17 +14,14 @@ from bluesky_web_plots.logger import logger
 
 
 class PlotServer:
-    def __init__(
-        self, host: str = "0.0.0.0", port=8080, columns=2, local_window_mode=False
-    ) -> None:
+    def __init__(self, host: str = "0.0.0.0", port=8080, columns=2) -> None:
         self.HOST = host
         self.PORT = port
         self._columns = columns
-        self.updated_plot_queue: Queue[tuple[frozenset[str], go.Figure]] = Queue()
-        self._plots: dict[frozenset[str], go.Figure] = {}
-        self._paused_figures: set[str] = set()
-        self._hidden_figures: set[str] = set()
+        self.updated_plot_queue: Queue[tuple[tuple[str, ...], go.Figure]] = Queue()
+        self._plots: dict[tuple[str, ...], go.Figure] = {}
         self._lock = threading.Lock()
+        self.deleted_plot_queue = Queue()
 
     def run(self) -> None:
         log = logging.getLogger("werkzeug")
@@ -48,7 +46,7 @@ class PlotServer:
 
         app_thread.start()
 
-    def add_widget(self, names: frozenset[str], figure: go.Figure):
+    def add_widget(self, names: tuple[str, ...], figure: go.Figure):
         with self._lock:
             self._plots[names] = figure
 
@@ -60,7 +58,19 @@ class PlotServer:
                 [
                     dbc.CardHeader(
                         dbc.Row(
-                            [dbc.Col(html.H5(name))],
+                            [
+                                dbc.Col(html.H5(name)),
+                                dbc.Col(
+                                    dbc.Button(
+                                        "Delete",
+                                        id={"type": "delete-btn", "index": name},
+                                        color="danger",
+                                        size="sm",
+                                        n_clicks=0,
+                                    ),
+                                    width="auto",
+                                ),
+                            ],
                             justify="between",
                         ),
                     ),
@@ -112,11 +122,32 @@ class PlotServer:
                 columns = [[] for _ in range(self._columns)]
                 columns_iter = itertools.cycle(columns)
                 for names, fig in self._plots.items():
-                    is_paused = names in self._paused_figures
-                    display_fig = (
-                        fig if not is_paused else fig
-                    )  # Show last state if paused
-                    next(columns_iter).append(make_card(", ".join(names), display_fig))
+                    next(columns_iter).append(make_card(", ".join(names), fig))
                 return dbc.Row(
                     [dbc.Col(column, width=12 // self._columns) for column in columns]
                 )
+
+        @app.callback(
+            Output("plots-container", "children", allow_duplicate=True),
+            Input({"type": "delete-btn", "index": ALL}, "n_clicks"),
+            State("plots-container", "children"),
+            prevent_initial_call=True,
+        )
+        def delete_plot(n_clicks_list, children):
+            ctx = callback_context
+            if not ctx.triggered or all(n is None or n == 0 for n in n_clicks_list):
+                return no_update
+            triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+            triggered_index = eval(triggered_id)["index"]
+            with self._lock:
+                plot_name = tuple(triggered_index.split(", "))
+                self._plots.pop(plot_name, None)
+                self.deleted_plot_queue.put(plot_name)
+            # Rebuild the cards after deletion
+            columns = [[] for _ in range(self._columns)]
+            columns_iter = itertools.cycle(columns)
+            for names, fig in self._plots.items():
+                next(columns_iter).append(make_card(", ".join(names), fig))
+            return dbc.Row(
+                [dbc.Col(column, width=12 // self._columns) for column in columns]
+            )

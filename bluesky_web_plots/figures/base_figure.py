@@ -13,6 +13,9 @@ class BaseFigureCallback(ABC, Generic[T]):
     structure: T
     figure: go.Figure
 
+    def __init__(self, structure: T):
+        self.structure = structure
+
     @abstractmethod
     def run_start(self, document: RunStart):
         pass

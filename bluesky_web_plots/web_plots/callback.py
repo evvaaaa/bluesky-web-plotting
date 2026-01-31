@@ -1,9 +1,7 @@
 import multiprocessing
-from plotly import graph_objs as go
-from plotly.io import from_json
+from pprint import pformat
 from queue import Queue
 from typing import cast
-from pprint import pformat
 
 from bluesky.callbacks.zmq import RemoteDispatcher
 from event_model import RunStop
@@ -15,13 +13,16 @@ from event_model.documents import (
     EventPage,
     RunStart,
 )
+from plotly.io import from_json
 
 from bluesky_web_plots.figures.array import ArrayFigureCallback
 from bluesky_web_plots.figures.base_figure import BaseFigureCallback
+from bluesky_web_plots.figures.sample_map import SampleMapFigureCallback
 from bluesky_web_plots.figures.scalar import ScalarFigureCallback
-from bluesky_web_plots.structures import Base, Array, Scalar
 from bluesky_web_plots.logger import logger
+from bluesky_web_plots.structures import Array, Base, Scalar
 from bluesky_web_plots.structures.array import View
+from bluesky_web_plots.structures.sample_map import SampleMap
 from bluesky_web_plots.structures.scalar import PlotAgainst
 from bluesky_web_plots.utils import hinted_fields
 
@@ -82,7 +83,7 @@ class WebPlotCallback:
 
         self._current_run_start: RunStart | None = None
         self.document_queue: Queue[Document] = Queue()
-        self._figures: dict[frozenset[str], BaseFigureCallback] = {}
+        self._figures: dict[tuple[str, ...], BaseFigureCallback] = {}
 
         # User defined structures. Cleared on each new run.
         self._structures: dict[frozenset, Base] = {}
@@ -103,19 +104,23 @@ class WebPlotCallback:
             self._local_window_mode = local_window_mode
             self._local_window_process = None
 
+        self._multi_data_key_structures: dict[
+            frozenset[str], type[BaseFigureCallback]
+        ] = {frozenset(SampleMap.__annotations__.keys()): SampleMapFigureCallback}
+
         logger.info(f"Starting gui at http://{plot_host}:{plot_port}")
         self._server.run()
 
     def _can_use_local_window(self) -> bool:
         try:
+            from PyQt5.QtCore import QUrl  # noqa: F401 # pyright: ignore
+            from PyQt5.QtWebEngineWidgets import (
+                QWebEngineView,  # noqa: F401 # pyright: ignore
+            )
             from PyQt5.QtWidgets import (
                 QApplication,  # noqa: F401 # pyright: ignore
                 QMainWindow,  # noqa: F401 # pyright: ignore
             )
-            from PyQt5.QtWebEngineWidgets import (
-                QWebEngineView,  # noqa: F401 # pyright: ignore
-            )
-            from PyQt5.QtCore import QUrl  # noqa: F401 # pyright: ignore
         except ImportError as exception:
             logger.warning(
                 f"\033[93mLocal window mode requires the 'local' optional dependencies. {exception} "
@@ -125,9 +130,9 @@ class WebPlotCallback:
         return True
 
     def _create_local_window(self):
-        from PyQt5.QtWidgets import QApplication, QMainWindow
-        from PyQt5.QtWebEngineWidgets import QWebEngineView
         from PyQt5.QtCore import QUrl
+        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PyQt5.QtWidgets import QApplication, QMainWindow
 
         app = QApplication([])
         window = QMainWindow()
@@ -173,18 +178,44 @@ class WebPlotCallback:
             self.event(cast(Event, document))
 
     def run_start(self, run_start: RunStart):
+        # The figures are all on the other thread. We can dereference here.
+        self._structures.clear()
         self._ignore_descriptors.clear()
+
+        while not self._server.deleted_plot_queue.empty():
+            del self._figures[self._server.deleted_plot_queue.get()]
+
         info = run_start.get("hints", {}).get("BLUESKY_LIVE_PLOTS", {})
+
         structures = info.get("STRUCTURES", ())
+
         self._structures = {frozenset(s["names"]): s for s in structures}
         if self._structures:
             logger.info(f"New plot structures {pformat(self._structures)}")
+
+        for structure in structures:
+            if frozenset(structure.keys()) in self._multi_data_key_structures:
+                figure_class = self._multi_data_key_structures[
+                    frozenset(structure.keys())
+                ]
+                names = (structure["names"],)
+                if names not in self._figures:
+                    new_figure = figure_class(structure)
+                    new_figure.run_start(run_start)
+                    # These figures aren't persistent we use the scan ID
+                    # and future runs will create new figures from them.
+                    self._figures[structure["names"]] = new_figure
+
+        # Cache this now for
         self._current_run_start = run_start
+
+        # Non-interactive serialised plots from run_start
         non_interactive_plots = info.get("SERIALISED_PLOT", {})
         for name, plot in non_interactive_plots.items():
             figure = from_json(plot)  # Validate it's a figure.
             logger.info(f"New serialised plot {name}")
-            self._server.updated_plot_queue.put((frozenset((name,)), figure))
+            self._server.updated_plot_queue.put(((name,), figure))
+
         for figure in self._figures.values():
             figure.run_start(run_start)
 
@@ -221,7 +252,7 @@ class WebPlotCallback:
             field for field in "data_keys" if field in self._structures
         ]
         for name in plotted_fields:
-            names = frozenset((name,))
+            names = (name,)
             if names not in self._figures:
                 new_figure = self._new_figure_from_datakey(
                     name, descriptor["data_keys"][name]
@@ -241,9 +272,9 @@ class WebPlotCallback:
         if event["descriptor"] in self._ignore_descriptors:
             return
 
-        datakeys = frozenset(event["data"].keys())
+        datakeys = frozenset((event["data"].keys()))
         for names, figure in self._figures.items():
-            if names <= datakeys:
+            if set(names) <= datakeys:
                 figure.event(event)
                 self._server.updated_plot_queue.put((names, figure.figure))
 
@@ -252,22 +283,10 @@ class WebPlotCallback:
             return
         datakeys = frozenset(event_page["data"].keys())
         for names, figure in self._figures.items():
-            if names <= datakeys:
+            if set(names) <= datakeys:
                 figure.event_page(event_page)
                 self._server.updated_plot_queue.put((names, figure.figure))
 
     def run_stop(self, run_stop: RunStop):
-        self._structures.clear()
-        non_interactive_plots = (
-            run_stop.get("hints", {})
-            .get("BLUESKY_LIVE_PLOTS", {})
-            .get("SERIALISED_PLOTLY", {})
-        )
-        for name, plot in non_interactive_plots.items():
-            logger.info(f"New serialised plot {name}")
-            self._server.updated_plot_queue.put(
-                (
-                    frozenset((name,)),
-                    plot,
-                )
-            )
+        while not self._server.deleted_plot_queue.empty():
+            del self._figures[self._server.deleted_plot_queue.get()]

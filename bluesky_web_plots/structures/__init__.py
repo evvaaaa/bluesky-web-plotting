@@ -1,9 +1,9 @@
-from typing import Unpack
-
-from .base_structure import Base as Base
-from .scalar import Scalar as Scalar
-from .array import Array as Array
 from plotly import graph_objs as go
+
+from .array import Array as Array
+from .base_structure import Base as Base
+from .sample_map import SampleMap as SampleMap
+from .scalar import Scalar as Scalar
 
 
 def unpack_structures(

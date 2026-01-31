@@ -21,6 +21,8 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
         self._scan_id = document.get("scan_id", document["uid"][4:])
 
     def descriptor(self, document: EventDescriptor):
+        if self.structure["names"][0] not in document["data_keys"].keys():
+            return
         data_key = document["data_keys"].get(self.structure["names"][0], {})
 
         self.figure.update_layout(
@@ -37,6 +39,8 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
         )
 
     def event(self, document: Event):
+        if self.structure["names"][0] not in document["data"].keys():
+            return
         if self.structure["plot_against"] == PlotAgainst.TIME:
             x = datetime.fromtimestamp(document["time"])
         else:
@@ -48,6 +52,8 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
         trace.y += (y,)  # type: ignore
 
     def event_page(self, document: EventPage):
+        if self.structure["names"][0] not in document["data"].keys():
+            return
         if self.structure["plot_against"] == PlotAgainst.TIME:
             x = [datetime.fromtimestamp(time) for time in document["time"]]
         else:
