@@ -58,6 +58,21 @@ def test_grid_scan(RE_and_mock_devices, plot_subprocess):
             md=plot_options,
         )
     )
+    RE(
+        grid_scan(
+            [mca],
+            motor1,
+            10,
+            20,
+            10,
+            motor2,
+            10,
+            20,
+            10,
+            snake_axes=True,
+            md=plot_options,
+        )
+    )
 
 
 def _make_arbitrary_figure() -> go.Figure:

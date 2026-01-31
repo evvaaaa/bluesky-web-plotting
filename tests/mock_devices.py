@@ -49,22 +49,16 @@ class Mca(StandardReadable):
         super().__init__(name=name)
         with self.add_children_as_readables():
             self.value, self.set_value = soft_signal_r_and_setter(
-                Array1D[np.int64], name="value"
+                Array1D[np.int64],
+                initial_value=np.ndarray(1024, dtype=np.int64),
+                name="value",
             )
             self.mean, self.set_mean = soft_signal_r_and_setter(int, name="mean")
 
 
-num_channels = 1024
-channels = np.arange(num_channels)
-peak = 50_000_000
-sigma = 100  # Adjust for width
-
-
-MOTOR_RANGES = (0, 100)
-
-
 def setup_sample_map_mock_logic(motor1: SomeActuator, motor2: SomeActuator, mca: Mca):
     # Best MCA reading at the optimum motor postition.
+    MOTOR_RANGES = (0, 100)
     PEAK = 50_000_000
     MCA_AT_X_Y_Z_50_99_67 = PEAK * np.exp(-0.5 * ((np.arange(1024) - 512) / 12) ** 2)
 

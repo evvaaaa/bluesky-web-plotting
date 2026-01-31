@@ -185,6 +185,8 @@ class WebPlotCallback:
             figure = from_json(plot)  # Validate it's a figure.
             logger.info(f"New serialised plot {name}")
             self._server.updated_plot_queue.put((frozenset((name,)), figure))
+        for figure in self._figures.values():
+            figure.run_start(run_start)
 
     def _new_figure_from_datakey(
         self, name: str, data_key: DataKey
