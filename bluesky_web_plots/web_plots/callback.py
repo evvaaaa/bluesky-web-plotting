@@ -1,8 +1,12 @@
 import multiprocessing
+from plotly import graph_objs as go
+from plotly.io import from_json
 from queue import Queue
 from typing import cast
+from pprint import pformat
 
 from bluesky.callbacks.zmq import RemoteDispatcher
+from event_model import RunStop
 from event_model.documents import (
     DataKey,
     Document,
@@ -15,8 +19,11 @@ from event_model.documents import (
 from bluesky_web_plots.figures.array import ArrayFigureCallback
 from bluesky_web_plots.figures.base_figure import BaseFigureCallback
 from bluesky_web_plots.figures.scalar import ScalarFigureCallback
+from bluesky_web_plots.structures import Base, Array, Scalar
 from bluesky_web_plots.logger import logger
-from bluesky_web_plots.utils import deep_update, hinted_fields
+from bluesky_web_plots.structures.array import View
+from bluesky_web_plots.structures.scalar import PlotAgainst
+from bluesky_web_plots.utils import hinted_fields
 
 from .server import PlotServer
 
@@ -26,9 +33,10 @@ class WebPlotCallback:
         self,
         zmq_uri: str | None = None,
         plot_host: str = "0.0.0.0",
-        plot_port=8080,
+        plot_port=12354,
         columns=3,
         local_window_mode: bool = False,
+        ignore_streams: tuple[str, ...] = (),
     ):
         """A callback for plotting event document output through the web, with either simple,
         or complicated structures.
@@ -48,6 +56,8 @@ class WebPlotCallback:
                 The number of columns that the plots will be packed into in the web ui.
             local_window_mode (bool):
                 Spawn a local Qt5 editor.
+            ignore_streams (tuple[str, ...]):
+                Stream names to ignore and not plot, e.g ("baseline",)
         """
 
         self.PLOT_PORT = plot_port
@@ -72,15 +82,18 @@ class WebPlotCallback:
 
         self._current_run_start: RunStart | None = None
         self.document_queue: Queue[Document] = Queue()
-        self._figures: dict[str, BaseFigureCallback] = {}
-        self._structures: dict = {}
+        self._figures: dict[frozenset[str], BaseFigureCallback] = {}
 
-        # local_window_mode is for when the process is for creating a local window
-        # a new one for each run whenever it's closed, mimicking best effort callback
+        # User defined structures. Cleared on each new run.
+        self._structures: dict[frozenset, Base] = {}
+
+        self._IGNORE_STREAMS = ignore_streams  # Streams to ignore.
+        self._ignore_descriptors = set()  # Desscriptor uids to ignore.
+
+        # local_window_mode creates a local window pyqt window in a subprocess to view your plot.
+        # A new one is made for each run whenever it's closed, mimicking best effort callback
         # and not relying on the browser process which may be slow from an abundance
-        # of tabs, or a bad browser. The plots will still be viewable
-        # from a normal browser.
-
+        # of tabs, or a bad browser. The plots will still be viewable from a normal browser.
         if local_window_mode and self._can_use_local_window():
             self._local_window_mode = local_window_mode
             self._local_window_process = multiprocessing.Process(
@@ -95,27 +108,33 @@ class WebPlotCallback:
 
     def _can_use_local_window(self) -> bool:
         try:
-            import gi  # noqa: F401 # pyright: ignore
-            import pycairo  # noqa: F401 # pyright: ignore
-            import pyqtwebengine  # noqa: F401 # pyright: ignore
-            import pywebview  # noqa: F401 # pyright: ignore
-        except ImportError:
+            from PyQt5.QtWidgets import (
+                QApplication,  # noqa: F401 # pyright: ignore
+                QMainWindow,  # noqa: F401 # pyright: ignore
+            )
+            from PyQt5.QtWebEngineWidgets import (
+                QWebEngineView,  # noqa: F401 # pyright: ignore
+            )
+            from PyQt5.QtCore import QUrl  # noqa: F401 # pyright: ignore
+        except ImportError as exception:
             logger.warning(
-                "\033[93mLocal window mode requires the 'local' optional dependencies. "
+                f"\033[93mLocal window mode requires the 'local' optional dependencies. {exception} "
                 "Install with: pip install .[local].\033[0m"
             )
             return False
         return True
 
     def _create_local_window(self):
-        from PyQt5.QtCore import QUrl  # noqa: F401 # pyright: ignore
-        from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: F401 # pyright: ignore
-        from PyQt5.QtWidgets import QApplication  # noqa: F401 # pyright: ignore
+        from PyQt5.QtWidgets import QApplication, QMainWindow
+        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PyQt5.QtCore import QUrl
 
         app = QApplication([])
-        view = QWebEngineView()
-        view.load(QUrl(f"http://localhost:{self.PLOT_PORT}"))
-        view.show()
+        window = QMainWindow()
+        browser = QWebEngineView()
+        browser.load(QUrl(f"http://localhost:{self.PLOT_PORT}"))
+        window.setCentralWidget(browser)
+        window.show()
         app.exec_()
 
     def run(self):
@@ -154,29 +173,54 @@ class WebPlotCallback:
             self.event(cast(Event, document))
 
     def run_start(self, run_start: RunStart):
-        self._structures = deep_update(
-            self._structures, run_start.get("hints", {}).get("WEB_PLOT_STRUCTURES", {})
-        )
+        self._ignore_descriptors.clear()
+        info = run_start.get("hints", {}).get("BLUESKY_LIVE_PLOTS", {})
+        structures = info.get("STRUCTURES", ())
+        self._structures = {frozenset(s["names"]): s for s in structures}
+        if self._structures:
+            logger.info(f"New plot structures {pformat(self._structures)}")
         self._current_run_start = run_start
+        non_interactive_plots = info.get("SERIALISED_PLOT", {})
+        for name, plot in non_interactive_plots.items():
+            figure = from_json(plot)  # Validate it's a figure.
+            logger.info(f"New serialised plot {name}")
+            self._server.updated_plot_queue.put((frozenset((name,)), figure))
 
     def _new_figure_from_datakey(
         self, name: str, data_key: DataKey
     ) -> BaseFigureCallback | None:
+        names = frozenset((name,))
         if data_key["dtype"] in ("number", "integer"):
-            return ScalarFigureCallback(name, structure=self._structures.get(name))
+            return ScalarFigureCallback(
+                cast(
+                    Scalar,
+                    self._structures.get(
+                        names, Scalar(names=(name,), plot_against=PlotAgainst.SEQ_NUM)
+                    ),
+                )
+            )
         if data_key["dtype"] == "array":
-            return ArrayFigureCallback(name, structure=self._structures.get(name))
+            return ArrayFigureCallback(
+                cast(
+                    Array,
+                    self._structures.get(names, Array(names=(name,), view=View.SLICE)),
+                )
+            )
 
         logger.warning(
             f"No figure available for data key {name} with dtype {data_key['dtype']}"
         )
 
     def descriptor(self, descriptor: EventDescriptor):
+        if descriptor.get("name") in self._IGNORE_STREAMS:
+            self._ignore_descriptors.add(descriptor["uid"])
+
         plotted_fields = hinted_fields(descriptor) + [
             field for field in "data_keys" if field in self._structures
         ]
         for name in plotted_fields:
-            if name not in self._figures:
+            names = frozenset((name,))
+            if names not in self._figures:
                 new_figure = self._new_figure_from_datakey(
                     name, descriptor["data_keys"][name]
                 )
@@ -186,19 +230,42 @@ class WebPlotCallback:
                 # it'll work, but you'll get 0 as your data key. Not really an issue.
                 if self._current_run_start:
                     new_figure.run_start(self._current_run_start)
-                self._figures[name] = new_figure
+                self._figures[names] = new_figure
 
         for figure in self._figures.values():
             figure.descriptor(descriptor)
 
     def event(self, event: Event):
-        for name in event["data"]:
-            if name in self._figures:
-                self._figures[name].event(event)
-                self._server.updated_plot_queue.put((name, self._figures[name].figure))
+        if event["descriptor"] in self._ignore_descriptors:
+            return
+
+        datakeys = frozenset(event["data"].keys())
+        for names, figure in self._figures.items():
+            if names <= datakeys:
+                figure.event(event)
+                self._server.updated_plot_queue.put((names, figure.figure))
 
     def event_page(self, event_page: EventPage):
-        for name in event_page["data"]:
-            if name in self._figures:
-                self._figures[name].event_page(event_page)
-                self._server.updated_plot_queue.put((name, self._figures[name].figure))
+        if event_page["descriptor"] in self._ignore_descriptors:
+            return
+        datakeys = frozenset(event_page["data"].keys())
+        for names, figure in self._figures.items():
+            if names <= datakeys:
+                figure.event_page(event_page)
+                self._server.updated_plot_queue.put((names, figure.figure))
+
+    def run_stop(self, run_stop: RunStop):
+        self._structures.clear()
+        non_interactive_plots = (
+            run_stop.get("hints", {})
+            .get("BLUESKY_LIVE_PLOTS", {})
+            .get("SERIALISED_PLOTLY", {})
+        )
+        for name, plot in non_interactive_plots.items():
+            logger.info(f"New serialised plot {name}")
+            self._server.updated_plot_queue.put(
+                (
+                    frozenset((name,)),
+                    plot,
+                )
+            )

@@ -19,8 +19,8 @@ class PlotServer:
         self.HOST = host
         self.PORT = port
         self._columns = columns
-        self.updated_plot_queue: Queue[tuple[str, go.Figure]] = Queue()
-        self._plots: dict[str, go.Figure] = {}
+        self.updated_plot_queue: Queue[tuple[frozenset[str], go.Figure]] = Queue()
+        self._plots: dict[frozenset[str], go.Figure] = {}
         self._paused_figures: set[str] = set()
         self._hidden_figures: set[str] = set()
         self._lock = threading.Lock()
@@ -48,9 +48,9 @@ class PlotServer:
 
         app_thread.start()
 
-    def add_widget(self, name: str, figure: go.Figure):
+    def add_widget(self, names: frozenset[str], figure: go.Figure):
         with self._lock:
-            self._plots[name] = figure
+            self._plots[names] = figure
 
     def _setup_layout(self):
         app = self._app
@@ -106,17 +106,17 @@ class PlotServer:
             logger.debug(f"Updated plots for the {n}th time.")
             with self._lock:
                 while not self.updated_plot_queue.empty():
-                    name, figure = self.updated_plot_queue.get()
-                    self._plots[name] = figure
+                    names, figure = self.updated_plot_queue.get()
+                    self._plots[names] = figure
 
                 columns = [[] for _ in range(self._columns)]
                 columns_iter = itertools.cycle(columns)
-                for name, fig in self._plots.items():
-                    is_paused = name in self._paused_figures
+                for names, fig in self._plots.items():
+                    is_paused = names in self._paused_figures
                     display_fig = (
                         fig if not is_paused else fig
                     )  # Show last state if paused
-                    next(columns_iter).append(make_card(name, display_fig))
+                    next(columns_iter).append(make_card(", ".join(names), display_fig))
                 return dbc.Row(
                     [dbc.Col(column, width=12 // self._columns) for column in columns]
                 )

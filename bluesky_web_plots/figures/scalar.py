@@ -12,16 +12,8 @@ from .base_figure import BaseFigureCallback
 class ScalarFigureCallback(BaseFigureCallback[Scalar]):
     structure: Scalar
 
-    def __init__(self, name: str, structure: Scalar | None = None):
-        if name and structure and name != structure["name"]:
-            raise ValueError(
-                f"Recieved different names from init argument {name} "
-                f"and stucture {self.structure['name']}"
-            )
-
-        self.structure: Scalar = structure or Scalar(
-            plot_against=PlotAgainst.SEQ_NUM, name=name
-        )
+    def __init__(self, structure: Scalar):
+        self.structure = structure
         self.figure = make_subplots(shared_xaxes=True)
         self.figure.update_layout({"uirevision": "constant"})
 
@@ -29,7 +21,7 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
         self._scan_id = document.get("scan_id", document["uid"][4:])
 
     def descriptor(self, document: EventDescriptor):
-        data_key = document["data_keys"].get(self.structure["name"], {})
+        data_key = document["data_keys"].get(self.structure["names"][0], {})
 
         self.figure.update_layout(
             dict(
@@ -50,7 +42,7 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
         else:
             x = document["seq_num"]
 
-        y = document["data"][self.structure["name"]]
+        y = document["data"][self.structure["names"][0]]
         trace = self.figure.data[-1]
         trace.x += (x,)  # type: ignore
         trace.y += (y,)  # type: ignore
@@ -61,7 +53,7 @@ class ScalarFigureCallback(BaseFigureCallback[Scalar]):
         else:
             x = document["seq_num"]
 
-        y = document["data"][self.structure["name"]]
+        y = document["data"][self.structure["names"][0]]
         trace = self.figure.data[-1]
         trace.x += tuple(x)  # type: ignore
         trace.y += tuple(y)  # type: ignore

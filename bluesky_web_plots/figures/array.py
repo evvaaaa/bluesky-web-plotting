@@ -9,14 +9,8 @@ from .base_figure import BaseFigureCallback
 
 
 class ArrayFigureCallback(BaseFigureCallback[Array]):
-    def __init__(self, name: str, structure: Array | None = None):
-        if name and structure and name != structure["name"]:
-            raise ValueError(
-                f"Recieved different names from init argument {name} "
-                f"and stucture {self.structure['name']}"
-            )
-
-        self.structure: Array = structure or Array(view=View.SLICE, name=name)
+    def __init__(self, structure: Array):
+        self.structure = structure
 
         self.figure = go.Figure()
         self.figure.update_layout({"uirevision": "constant"})
@@ -26,9 +20,9 @@ class ArrayFigureCallback(BaseFigureCallback[Array]):
         self._scan_id = document.get("scan_id", document["uid"][4:])
 
     def descriptor(self, document: EventDescriptor):
-        data_key = document["data_keys"].get(self.structure["name"], {})
-        shape = data_key["shape"]
-        if len(shape) == 1 and self.structure["view"] == View.SLICE:
+        data_key = document["data_keys"].get(self.structure["names"][0], {})
+        shape = data_key.get("shape")
+        if shape and self.structure["view"] == View.SLICE:
             self.figure.add_trace(go.Scatter(x=[], y=[], name=f"plan {self._scan_id}"))
         else:
             self.figure.add_trace(
@@ -37,7 +31,7 @@ class ArrayFigureCallback(BaseFigureCallback[Array]):
 
     def event(self, document: Event):
         trace = self.figure.data[-1]
-        received = document["data"][self.structure["name"]]
+        received = document["data"][self.structure["names"][0]]
         if self.structure["view"] == View.SLICE:
             trace.x = tuple(range(len(received)))  # type: ignore
             trace.y = tuple(received)  # type: ignore

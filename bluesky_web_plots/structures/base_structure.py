@@ -2,4 +2,4 @@ from typing import TypedDict
 
 
 class Base(TypedDict):
-    name: str
+    names: tuple[str, ...]

@@ -11,6 +11,7 @@ classifiers = [
 name = "bluesky-web-plots"
 description = "Dash + plotly bluesky plotting sevice/callback."
 dependencies = [
+  "uv",
   "plotly[express]",
   "zmq",
   "event-model",
@@ -29,10 +30,8 @@ email = "eva.lott@helmholtz-berlin.de"
 name = "Eva Lott"
 
 [project.optional-dependencies]
+local = ["PyQt5", "PyQtWebEngine"]
 dev = ["ruff", "pyright", "bluesky", "ophyd_async", "pytest-asyncio"]
-# If you want to use the callback in the same thread
-local = ["pyqtwebengine", "pywebview", "pywebview[qt]", "pycairo", "PyGObject"]
-
 
 [tool.setuptools_scm]
 version_file = "bluesky_web_plots/_version.py"

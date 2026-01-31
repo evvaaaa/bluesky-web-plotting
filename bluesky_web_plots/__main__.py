@@ -19,7 +19,7 @@ def main():
     parser.add_argument(
         "--plot-port",
         type=int,
-        default=8080,
+        default=12354,
         help="Port for viewing the web interface.",
     )
     parser.add_argument(
